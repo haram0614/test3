@@ -8,24 +8,32 @@ import streamlit as st
 # 1. 페이지 기본 설정 및 제목 표시
 # ==========================================
 st.set_page_config(
-    page_title="어제 박스오피스 순위",
+    page_title="일별 박스오피스 조회",
     page_icon="🎬",
     layout="wide"
 )
 
-st.title("🎬 어제 일별 박스오피스 순위")
+st.title("🎬 일별 박스오피스 조회")
 
 # ==========================================
-# 2. 한국 시간(KST) 기준 어제 날짜 구하기
-# 배포 서버의 시계가 UTC(세계 표준시)일 수 있으므로 KST로 명시적 변환
+# 2. 날짜 선택 달력 (최대 선택 가능일: KST 기준 어제)
+# 배포 서버 시계(UTC)와 상관없이 KST 기준으로 어제를 계산합니다.
 # ==========================================
 kst = pytz.timezone('Asia/Seoul')
 now_kst = datetime.datetime.now(kst)
-yesterday = now_kst - datetime.timedelta(days=1)
-target_dt = yesterday.strftime('%Y%m%d')        # API 요청용 (예: 20261021)
-display_date = yesterday.strftime('%Y년 %m월 %d일') # 화면 표시용
+max_selectable_date = (now_kst - datetime.timedelta(days=1)).date()
 
-st.caption(f"📅 **조회 기준일:** {display_date} (한국 시간 기준 어제)")
+# Sidebar 또는 메인 화면에서 날짜를 고를 수 있도록 날짜 피커 배치
+selected_date = st.date_input(
+    label="📅 조회할 날짜를 선택하세요 (최대 어제까지 선택 가능)",
+    value=max_selectable_date,
+    max_value=max_selectable_date
+)
+
+target_dt = selected_date.strftime('%Y%m%d')        # API 요청용 (예: 20261021)
+display_date = selected_date.strftime('%Y년 %m월 %d일') # 화면 표시용
+
+st.caption(f"📅 **현재 조회 날짜:** {display_date}")
 
 # ==========================================
 # 3. KOBIS API 인증키 불러오기
@@ -53,7 +61,7 @@ params = {
 
 try:
     response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()  # HTTP status가 200이 아닐 경우 예외 발생
+    response.raise_for_status()
     data = response.json()
 except requests.exceptions.RequestException as e:
     st.error("📡 API 서버와의 통신에 실패했습니다.")
@@ -67,7 +75,6 @@ except requests.exceptions.RequestException as e:
 # ==========================================
 # 5. 응답 예외 처리 (오류 상자 또는 데이터 누락)
 # ==========================================
-# 인증키가 틀렸거나 오류 발생 시 KOBIS는 faultInfo 상자를 반환함
 if "faultInfo" in data:
     st.error(f"❌ KOBIS API 오류가 발생했습니다: {data['faultInfo'].get('message', '알 수 없는 오류')}")
     st.info("""
@@ -80,13 +87,13 @@ if "faultInfo" in data:
 box_office_result = data.get("boxOfficeResult", {})
 movie_list = box_office_result.get("dailyBoxOfficeList", [])
 
-# 데이터 목록이 비어있는 경우
+# 고른 날짜의 데이터 목록이 비어있는 경우 안내 문구 표시
 if not movie_list:
-    st.warning("⚠️ 어제 박스오피스 데이터가 아직 집계되지 않았거나 존재하지 않습니다.")
+    st.warning("⚠️ 그날은 아직 집계 전입니다.")
     st.info("""
     **확인 및 해결 방법:**
-    - KOBIS의 일별 박스오피스는 보통 매일 오전에 최종 집계됩니다.
-    - 잠시 후 페이지를 새로고침(F5)하여 다시 확인해 보세요.
+    - KOBIS의 일별 박스오피스는 매일 오전에 최종 집계됩니다.
+    - 다른 날짜를 선택하시거나, 잠시 후 다시 시도해 주세요.
     """)
     st.stop()
 
@@ -95,7 +102,6 @@ if not movie_list:
 # ==========================================
 df = pd.DataFrame(movie_list)
 
-# 숫자로 사용되는 컬럼들을 정수형으로 변환
 numeric_cols = ["rank", "rankInten", "audiCnt", "audiAcc", "scrnCnt", "showCnt"]
 for col in numeric_cols:
     if col in df.columns:
@@ -106,17 +112,22 @@ for col in numeric_cols:
 # ==========================================
 top_movie = df.iloc[0]
 
+# 100만 관객 돌파 시 1위 제목 옆에도 트로피 표시
+top_title = top_movie['movieNm']
+if top_movie['audiAcc'] >= 1000000:
+    top_title += " 🏆"
+
 st.markdown("---")
-st.subheader(f"🥇 1위: {top_movie['movieNm']}")
+st.subheader(f"🥇 1위: {top_title}")
 
 col1, col2, col3 = st.columns(3)
 
 # 전일 대비 순위 변환 (+2, -1, 변동없음)
 rank_inten = top_movie['rankInten']
 if rank_inten > 0:
-    rank_delta = f"▲ {rank_inten}"
+    rank_delta = f"🔺 {rank_inten}"
 elif rank_inten < 0:
-    rank_delta = f"▼ {abs(rank_inten)}"
+    rank_delta = f"🔹 {abs(rank_inten)}"
 else:
     rank_delta = "변동없음"
 
@@ -143,7 +154,6 @@ st.markdown("---")
 st.subheader("📊 관객수 상위 5편")
 
 top5_df = df.head(5)[["movieNm", "audiCnt"]].copy()
-# 차트 범례 이름 깔끔하게 변경
 top5_df.columns = ["영화명", "일일 관객수"]
 
 st.bar_chart(
@@ -154,16 +164,37 @@ st.bar_chart(
 )
 
 # ==========================================
-# 9. 전체 순위 표 (Table)
+# 9. 전체 순위 표 (Table) 및 가공 처리
 # ==========================================
 st.markdown("---")
 st.subheader("📋 전체 박스오피스 순위")
 
-# 요청하신 출력용 컬럼만 선택 및 한글 표제어로 변경
-display_df = df[["rank", "movieNm", "openDt", "audiCnt", "audiAcc", "scrnCnt"]].copy()
-display_df.columns = ["순위", "영화명", "개봉일", "일일 관객수", "누적 관객수", "스크린수"]
+# (조건 1) 누적관객 100만 명 이상 영화명 옆에 🏆 이모지 추가
+def format_movie_title(row):
+    title = row["movieNm"]
+    if row["audiAcc"] >= 1000000:
+        return f"{title} 🏆"
+    return title
 
-# 천 단위 쉼표(,) 포맷팅 적용
+# (조건 2) rankInten 값에 따라 순위 증감 화살표 적용
+# 양수: 🔺 (빨간 위 화살표), 음수: 🔹 (파란 아래 화살표), 0: -
+def format_rank_change(inten):
+    if inten > 0:
+        return f"🔺 {inten}"
+    elif inten < 0:
+        return f"🔹 {abs(inten)}"
+    else:
+        return "-"
+
+# 가공된 컬럼 생성
+df["영화명_가공"] = df.apply(format_movie_title, axis=1)
+df["순위변동"] = df["rankInten"].apply(format_rank_change)
+
+# 표에 보여줄 컬럼 선택 및 이름 변경
+display_df = df[["rank", "순위변동", "영화명_가공", "openDt", "audiCnt", "audiAcc", "scrnCnt"]].copy()
+display_df.columns = ["순위", "순위변동", "영화명", "개봉일", "일일 관객수", "누적 관객수", "스크린수"]
+
+# 숫자 포맷팅 (천 단위 쉼표)
 display_df["일일 관객수"] = display_df["일일 관객수"].apply(lambda x: f"{x:,}")
 display_df["누적 관객수"] = display_df["누적 관객수"].apply(lambda x: f"{x:,}")
 display_df["스크린수"] = display_df["스크린수"].apply(lambda x: f"{x:,}")
