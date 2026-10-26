@@ -166,15 +166,20 @@ st.bar_chart(
 # ==========================================
 # 9. 전체 순위 표 (Table) 및 가공 처리
 # ==========================================
+# ==========================================
+# 9. 전체 순위 표 (Table) 및 가공 처리
+# ==========================================
 st.markdown("---")
 st.subheader("📋 전체 박스오피스 순위")
 
+# (조건 1) 누적관객 100만 명 이상 영화명 옆에 🏆 이모지 추가
 def format_movie_title(row):
     title = row["movieNm"]
     if row["audiAcc"] >= 1000000:
         return f"{title} 🏆"
     return title
 
+# (조건 2) rankInten 값에 따라 순위 증감 화살표 적용
 def format_rank_change(inten):
     if inten > 0:
         return f"🔺 {inten}"
@@ -183,20 +188,23 @@ def format_rank_change(inten):
     else:
         return "-"
 
+# 가공된 컬럼 생성
 df["영화명_가공"] = df.apply(format_movie_title, axis=1)
 df["순위변동"] = df["rankInten"].apply(format_rank_change)
 
-# 표에 보여줄 컬럼 선택 (순위 컬럼은 int 상태 그대로 유지)
+# 표에 보여줄 컬럼 선택 (숫자 데이터는 int 타입 그대로 유지)
 display_df = df[["rank", "순위변동", "영화명_가공", "openDt", "audiCnt", "audiAcc", "scrnCnt"]].copy()
 display_df.columns = ["순위", "순위변동", "영화명", "개봉일", "일일 관객수", "누적 관객수", "스크린수"]
 
-# 관객수와 스크린수만 천 단위 쉼표 포맷팅
-display_df["일일 관객수"] = display_df["일일 관객수"].apply(lambda x: f"{x:,}")
-display_df["누적 관객수"] = display_df["누적 관객수"].apply(lambda x: f"{x:,}")
-display_df["스크린수"] = display_df["스크린수"].apply(lambda x: f"{x:,}")
-
+# ⚠️ 문자열 포맷팅(apply)을 제거하고, Streamlit column_config를 사용해 쉼표 표기 및 정렬 문제 해결
 st.dataframe(
     display_df,
     hide_index=True,
-    use_container_width=True
+    use_container_width=True,
+    column_config={
+        "순위": st.column_config.NumberColumn("순위", format="%d"),
+        "일일 관객수": st.column_config.NumberColumn("일일 관객수", format="%d"),
+        "누적 관객수": st.column_config.NumberColumn("누적 관객수", format="%d"),
+        "스크린수": st.column_config.NumberColumn("스크린수", format="%d"),
+    }
 )
