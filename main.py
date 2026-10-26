@@ -142,4 +142,61 @@ col2.metric(
     value=f"{top_movie['audiAcc']:,} 명"
 )
 
-col
+col3.metric(
+    label="스크린 수",
+    value=f"{top_movie['scrnCnt']:,} 개"
+)
+
+# ==========================================
+# 8. 관객수 상위 5편 막대그래프
+# ==========================================
+st.markdown("---")
+st.subheader("📊 관객수 상위 5편")
+
+top5_df = df.head(5)[["movieNm", "audiCnt"]].copy()
+top5_df.columns = ["영화명", "일일 관객수"]
+
+st.bar_chart(
+    data=top5_df,
+    x="영화명",
+    y="일일 관객수",
+    use_container_width=True
+)
+
+# ==========================================
+# 9. 전체 순위 표 (Table) 및 가공 처리
+# ==========================================
+st.markdown("---")
+st.subheader("📋 전체 박스오피스 순위")
+
+def format_movie_title(row):
+    title = row["movieNm"]
+    if row["audiAcc"] >= 1000000:
+        return f"{title} 🏆"
+    return title
+
+def format_rank_change(inten):
+    if inten > 0:
+        return f"🔺 {inten}"
+    elif inten < 0:
+        return f"🔹 {abs(inten)}"
+    else:
+        return "-"
+
+df["영화명_가공"] = df.apply(format_movie_title, axis=1)
+df["순위변동"] = df["rankInten"].apply(format_rank_change)
+
+# 표에 보여줄 컬럼 선택 (순위 컬럼은 int 상태 그대로 유지)
+display_df = df[["rank", "순위변동", "영화명_가공", "openDt", "audiCnt", "audiAcc", "scrnCnt"]].copy()
+display_df.columns = ["순위", "순위변동", "영화명", "개봉일", "일일 관객수", "누적 관객수", "스크린수"]
+
+# 관객수와 스크린수만 천 단위 쉼표 포맷팅
+display_df["일일 관객수"] = display_df["일일 관객수"].apply(lambda x: f"{x:,}")
+display_df["누적 관객수"] = display_df["누적 관객수"].apply(lambda x: f"{x:,}")
+display_df["스크린수"] = display_df["스크린수"].apply(lambda x: f"{x:,}")
+
+st.dataframe(
+    display_df,
+    hide_index=True,
+    use_container_width=True
+)
