@@ -23,21 +23,19 @@ kst = pytz.timezone('Asia/Seoul')
 now_kst = datetime.datetime.now(kst)
 max_selectable_date = (now_kst - datetime.timedelta(days=1)).date()
 
-# Sidebar 또는 메인 화면에서 날짜를 고를 수 있도록 날짜 피커 배치
 selected_date = st.date_input(
     label="📅 조회할 날짜를 선택하세요 (최대 어제까지 선택 가능)",
     value=max_selectable_date,
     max_value=max_selectable_date
 )
 
-target_dt = selected_date.strftime('%Y%m%d')        # API 요청용 (예: 20261021)
+target_dt = selected_date.strftime('%Y%m%d')        # API 요청용 (예: 20261025)
 display_date = selected_date.strftime('%Y년 %m월 %d일') # 화면 표시용
 
 st.caption(f"📅 **현재 조회 날짜:** {display_date}")
 
 # ==========================================
 # 3. KOBIS API 인증키 불러오기
-# secrets.toml 또는 Streamlit Cloud Secrets의 KOBIS_KEY 사용
 # ==========================================
 if "KOBIS_KEY" not in st.secrets:
     st.error("🔑 API 인증키가 설정되지 않았습니다.")
@@ -87,7 +85,6 @@ if "faultInfo" in data:
 box_office_result = data.get("boxOfficeResult", {})
 movie_list = box_office_result.get("dailyBoxOfficeList", [])
 
-# 고른 날짜의 데이터 목록이 비어있는 경우 안내 문구 표시
 if not movie_list:
     st.warning("⚠️ 그날은 아직 집계 전입니다.")
     st.info("""
@@ -98,21 +95,25 @@ if not movie_list:
     st.stop()
 
 # ==========================================
-# 6. 데이터 전처리 (문자열 -> 숫자 변환)
+# 6. 데이터 전처리 (문자열 -> 정수 변환 및 오름차순 정렬)
 # ==========================================
 df = pd.DataFrame(movie_list)
 
+# 숫자로 쓰이는 컬럼들을 명시적으로 정수(int) 변환
 numeric_cols = ["rank", "rankInten", "audiCnt", "audiAcc", "scrnCnt", "showCnt"]
 for col in numeric_cols:
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
+# ⚠️ 핵심: 정수형 rank를 기준으로 데이터프레임을 명시적으로 오름차순(1 -> 10) 정렬
+df = df.sort_values(by="rank", ascending=True).reset_index(drop=True)
+
 # ==========================================
 # 7. 1위 영화 지표 카드 (Metrics)
 # ==========================================
+# 명시적으로 정렬된 df에서 1위(rank == 1) 행 추출
 top_movie = df.iloc[0]
 
-# 100만 관객 돌파 시 1위 제목 옆에도 트로피 표시
 top_title = top_movie['movieNm']
 if top_movie['audiAcc'] >= 1000000:
     top_title += " 🏆"
@@ -122,7 +123,6 @@ st.subheader(f"🥇 1위: {top_title}")
 
 col1, col2, col3 = st.columns(3)
 
-# 전일 대비 순위 변환 (+2, -1, 변동없음)
 rank_inten = top_movie['rankInten']
 if rank_inten > 0:
     rank_delta = f"🔺 {rank_inten}"
@@ -142,65 +142,4 @@ col2.metric(
     value=f"{top_movie['audiAcc']:,} 명"
 )
 
-col3.metric(
-    label="스크린 수",
-    value=f"{top_movie['scrnCnt']:,} 개"
-)
-
-# ==========================================
-# 8. 관객수 상위 5편 막대그래프
-# ==========================================
-st.markdown("---")
-st.subheader("📊 관객수 상위 5편")
-
-top5_df = df.head(5)[["movieNm", "audiCnt"]].copy()
-top5_df.columns = ["영화명", "일일 관객수"]
-
-st.bar_chart(
-    data=top5_df,
-    x="영화명",
-    y="일일 관객수",
-    use_container_width=True
-)
-
-# ==========================================
-# 9. 전체 순위 표 (Table) 및 가공 처리
-# ==========================================
-st.markdown("---")
-st.subheader("📋 전체 박스오피스 순위")
-
-# (조건 1) 누적관객 100만 명 이상 영화명 옆에 🏆 이모지 추가
-def format_movie_title(row):
-    title = row["movieNm"]
-    if row["audiAcc"] >= 1000000:
-        return f"{title} 🏆"
-    return title
-
-# (조건 2) rankInten 값에 따라 순위 증감 화살표 적용
-# 양수: 🔺 (빨간 위 화살표), 음수: 🔹 (파란 아래 화살표), 0: -
-def format_rank_change(inten):
-    if inten > 0:
-        return f"🔺 {inten}"
-    elif inten < 0:
-        return f"🔹 {abs(inten)}"
-    else:
-        return "-"
-
-# 가공된 컬럼 생성
-df["영화명_가공"] = df.apply(format_movie_title, axis=1)
-df["순위변동"] = df["rankInten"].apply(format_rank_change)
-
-# 표에 보여줄 컬럼 선택 및 이름 변경
-display_df = df[["rank", "순위변동", "영화명_가공", "openDt", "audiCnt", "audiAcc", "scrnCnt"]].copy()
-display_df.columns = ["순위", "순위변동", "영화명", "개봉일", "일일 관객수", "누적 관객수", "스크린수"]
-
-# 숫자 포맷팅 (천 단위 쉼표)
-display_df["일일 관객수"] = display_df["일일 관객수"].apply(lambda x: f"{x:,}")
-display_df["누적 관객수"] = display_df["누적 관객수"].apply(lambda x: f"{x:,}")
-display_df["스크린수"] = display_df["스크린수"].apply(lambda x: f"{x:,}")
-
-st.dataframe(
-    display_df,
-    hide_index=True,
-    use_container_width=True
-)
+col
